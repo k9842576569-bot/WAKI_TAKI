@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>VoiceCast — Walkie Talkie</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.1.0/paho-mqtt.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700;900&family=Share+Tech+Mono&family=Barlow:wght@300;400;500;600&display=swap');
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+html,body{height:100%;overflow:hidden;touch-action:manipulation;}
+
+:root{
+  --bg:#0b0e0b;
+  --panel:#111611;
+  --card:#161d16;
+  --border:#1e2a1e;
+  --border2:#253025;
+  --green:#00ff88;
+  --green-dim:#00cc6a;
+  --green-dark:#004422;
+  --red:#ff3355;
+  --yellow:#ffcc00;
+  --amber:#ff8800;
+  --text:#c8dcc8;
+  --muted:#4a604a;
+  --muted2:#2d3d2d;
+  --lcd:#001a00;
+  --lcd-text:#00ff88;
+}
+
+body{
+  font-family:'Barlow',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  min-height:100vh;
+  position:relative;
+}
+
+/* Scanline overlay */
+body::before{
+  content:'';position:fixed;inset:0;pointer-events:none;z-index:999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px);
+}
+
+/* ── SETUP SCREEN ─────────────────────────────────────── */
+#setup{
+  width:100%;max-width:380px;padding:24px;
+  display:flex;flex-direction:column;gap:16px;
+}
+
+.device-logo{
+  text-align:center;margin-bottom:8px;
+}
+.device-name{
+  font-family:'Orbitron',sans-serif;font-weight:900;
+  font-size:clamp(1.8rem,8vw,2.8rem);
+  color:var(--green);
+  text-shadow:0 0 20px rgba(0,255,136,0.5),0 0 60px rgba(0,255,136,0.2);
+  letter-spacing:4px;
+}
+.device-model{
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.7rem;letter-spacing:3px;color:var(--muted);
+  margin-top:4px;
+}
+
+/* LCD display panel */
+.lcd-panel{
+  background:var(--lcd);
+  border:2px solid var(--border2);
+  border-radius:8px;
+  padding:14px 16px;
+  font-family:'Share Tech Mono',monospace;
+  box-shadow:inset 0 0 20px rgba(0,0,0,0.8),0 0 10px rgba(0,255,136,0.05);
+  position:relative;overflow:hidden;
+}
+.lcd-panel::before{
+  content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 3px,rgba(0,255,136,0.02) 3px,rgba(0,255,136,0.02) 4px);
+  pointer-events:none;
+}
+.lcd-label{font-size:0.6rem;letter-spacing:2px;color:rgba(0,255,136,0.4);margin-bottom:6px;text-transform:uppercase;}
+.lcd-value{font-size:1rem;color:var(--lcd-text);text-shadow:0 0 8px rgba(0,255,136,0.4);}
+.lcd-value.small{font-size:0.8rem;}
+.lcd-blink{animation:lcdblink 1s step-end infinite;}
+@keyframes lcdblink{0%,100%{opacity:1}50%{opacity:0}}
+
+.setup-row{display:flex;gap:8px;}
+.wt-input{
+  flex:1;background:var(--card);
+  border:1px solid var(--border2);border-radius:8px;
+  padding:11px 14px;color:var(--green);
+  font-family:'Share Tech Mono',monospace;font-size:0.9rem;
+  outline:none;letter-spacing:1px;
+  transition:border-color 0.2s,box-shadow 0.2s;
+}
+.wt-input:focus{border-color:var(--green-dim);box-shadow:0 0 0 2px rgba(0,255,136,0.1);}
+.wt-input::placeholder{color:var(--muted);}
+
+.btn-rand{
+  background:var(--card);border:1px solid var(--border2);
+  border-radius:8px;padding:11px 14px;
+  color:var(--muted);font-family:'Share Tech Mono',monospace;
+  font-size:0.75rem;cursor:pointer;letter-spacing:1px;
+  transition:all 0.2s;white-space:nowrap;
+}
+.btn-rand:hover{border-color:var(--green-dim);color:var(--green);}
+
+/* Role selector */
+.role-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.role-btn{
+  background:var(--card);border:2px solid var(--border2);
+  border-radius:10px;padding:16px 10px;cursor:pointer;
+  text-align:center;transition:all 0.2s;
+  font-family:'Barlow',sans-serif;
+}
+.role-btn:hover{border-color:var(--muted);}
+.role-btn.active{border-color:var(--green);background:var(--green-dark);box-shadow:0 0 16px rgba(0,255,136,0.15);}
+.role-icon{font-size:1.8rem;display:block;margin-bottom:6px;}
+.role-label{font-weight:600;font-size:0.82rem;color:var(--text);}
+.role-sub{font-size:0.68rem;color:var(--muted);margin-top:2px;}
+
+.btn-connect{
+  width:100%;padding:15px;
+  background:var(--green-dark);border:2px solid var(--green-dim);
+  border-radius:10px;
+  font-family:'Orbitron',sans-serif;font-weight:700;font-size:0.9rem;
+  letter-spacing:2px;color:var(--green);cursor:pointer;
+  transition:all 0.2s;
+  text-shadow:0 0 10px rgba(0,255,136,0.4);
+  box-shadow:0 0 20px rgba(0,255,136,0.1);
+}
+.btn-connect:hover{background:rgba(0,255,136,0.1);box-shadow:0 0 30px rgba(0,255,136,0.2);}
+.btn-connect:disabled{opacity:0.4;cursor:not-allowed;}
+
+.status-line{
+  text-align:center;font-family:'Share Tech Mono',monospace;
+  font-size:0.72rem;color:var(--muted);letter-spacing:1px;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+}
+.sig-dot{width:6px;height:6px;border-radius:50%;background:var(--muted2);}
+.sig-dot.conn{background:var(--green);box-shadow:0 0 6px var(--green);}
+.sig-dot.blink{background:var(--yellow);animation:lcdblink 0.6s infinite;}
+.sig-dot.err{background:var(--red);}
+
+.saved-bar{
+  display:flex;align-items:center;gap:8px;
+  background:rgba(0,255,136,0.05);border:1px solid rgba(0,255,136,0.15);
+  border-radius:8px;padding:8px 12px;
+  font-family:'Share Tech Mono',monospace;font-size:0.72rem;color:var(--green);
+}
+
+/* ── WALKIE TALKIE DEVICE ─────────────────────────────── */
+#walkie{
+  display:none;
+  width:100%;max-width:340px;
+  padding:16px;
+}
+
+/* The physical device look */
+.device-body{
+  background:linear-gradient(160deg,#1a2218 0%,#0f160f 40%,#111811 100%);
+  border:2px solid #1e2a1e;
+  border-radius:24px 24px 20px 20px;
+  padding:20px 18px 24px;
+  box-shadow:
+    0 20px 60px rgba(0,0,0,0.8),
+    inset 0 1px 0 rgba(255,255,255,0.05),
+    inset 0 -2px 0 rgba(0,0,0,0.5),
+    4px 0 0 #141a14,
+    -4px 0 0 #141a14;
+  position:relative;
+}
+
+/* Antenna */
+.antenna{
+  width:8px;height:50px;
+  background:linear-gradient(180deg,#2a3a2a,#1a221a);
+  border:1px solid #1e2a1e;border-radius:4px 4px 0 0;
+  margin:0 auto -4px;
+  position:relative;
+}
+.antenna::before{
+  content:'';position:absolute;top:-4px;left:50%;transform:translateX(-50%);
+  width:10px;height:10px;border-radius:50%;
+  background:var(--green-dim);box-shadow:0 0 6px var(--green);
+}
+
+/* LCD screen on device */
+.device-lcd{
+  background:#010e01;
+  border:2px solid #0a140a;
+  border-radius:8px;padding:12px 14px;
+  margin-bottom:14px;
+  box-shadow:inset 0 0 15px rgba(0,0,0,0.9);
+  position:relative;overflow:hidden;min-height:90px;
+}
+.device-lcd::before{
+  content:'';position:absolute;inset:0;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,255,136,0.015) 2px,rgba(0,255,136,0.015) 4px);
+}
+.lcd-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;}
+.lcd-ch{font-family:'Orbitron',monospace;font-size:0.65rem;letter-spacing:2px;color:rgba(0,255,136,0.5);}
+.lcd-signal{display:flex;gap:2px;align-items:flex-end;}
+.sig-bar{width:3px;border-radius:1px;background:var(--green);opacity:0.3;}
+.sig-bar.active{opacity:1;}
+.sig-bar:nth-child(1){height:4px;}
+.sig-bar:nth-child(2){height:7px;}
+.sig-bar:nth-child(3){height:10px;}
+.sig-bar:nth-child(4){height:13px;}
+.sig-bar:nth-child(5){height:16px;}
+
+.lcd-status-big{
+  font-family:'Orbitron',sans-serif;font-weight:700;
+  font-size:0.85rem;color:var(--green);
+  text-shadow:0 0 8px rgba(0,255,136,0.5);
+  letter-spacing:2px;margin-bottom:2px;
+}
+.lcd-status-sub{
+  font-family:'Share Tech Mono',monospace;
+  font-size:0.65rem;color:rgba(0,255,136,0.5);letter-spacing:1px;
+}
+
+/* Waveform visualizer */
+.waveform{
+  display:flex;align-items:center;justify-content:center;
+  gap:3px;height:28px;margin-top:8px;
+}
+.wave-bar{
+  width:3px;border-radius:2px;
+  background:var(--green);opacity:0.2;
+  height:4px;transition:height 0.05s;
+}
+.waveform.active .wave-bar{opacity:0.8;}
+
+/* Speaker grille */
+.speaker-grille{
+  display:grid;grid-template-columns:repeat(8,1fr);gap:3px;
+  padding:10px;background:#0d130d;border-radius:8px;
+  border:1px solid #182018;margin-bottom:14px;
+}
+.grille-dot{
+  width:100%;aspect-ratio:1;border-radius:50%;
+  background:#1a241a;
+  box-shadow:inset 0 1px 1px rgba(0,0,0,0.8);
+}
+
+/* Channel + volume knobs row */
+.knobs-row{display:flex;gap:10px;margin-bottom:14px;align-items:center;}
+.knob-group{flex:1;text-align:center;}
+.knob-label{font-family:'Share Tech Mono',monospace;font-size:0.55rem;color:var(--muted);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px;}
+.knob{
+  width:36px;height:36px;border-radius:50%;margin:0 auto;
+  background:radial-gradient(circle at 35% 35%,#2a3a2a,#111811);
+  border:2px solid #1e2a1e;
+  box-shadow:0 3px 6px rgba(0,0,0,0.6),inset 0 1px 0 rgba(255,255,255,0.05);
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;transition:transform 0.1s;position:relative;
+}
+.knob::before{
+  content:'';position:absolute;top:4px;left:50%;
+  width:2px;height:10px;background:var(--green-dim);
+  border-radius:1px;transform:translateX(-50%);
+}
+.knob:active{transform:rotate(30deg);}
+.knob-val{font-family:'Share Tech Mono',monospace;font-size:0.65rem;color:var(--green);margin-top:4px;}
+
+/* PTT BUTTON — the big one */
+.ptt-area{
+  position:relative;
+  display:flex;align-items:center;justify-content:center;
+  padding:10px 0;
+}
+
+.ptt-outer{
+  width:130px;height:130px;border-radius:50%;
+  background:radial-gradient(circle,rgba(0,255,136,0.05) 0%,transparent 70%);
+  border:2px solid rgba(0,255,136,0.1);
+  display:flex;align-items:center;justify-content:center;
+  position:relative;
+  animation:pttIdle 3s ease-in-out infinite;
+}
+@keyframes pttIdle{0%,100%{box-shadow:0 0 0 0 rgba(0,255,136,0.1)}50%{box-shadow:0 0 0 12px rgba(0,255,136,0.05)}}
+.ptt-outer.transmitting{
+  animation:pttTX 0.4s ease-in-out infinite alternate;
+  border-color:var(--red);
+  background:radial-gradient(circle,rgba(255,51,85,0.08) 0%,transparent 70%);
+}
+@keyframes pttTX{0%{box-shadow:0 0 0 0 rgba(255,51,85,0.3)}100%{box-shadow:0 0 0 20px rgba(255,51,85,0)}}
+.ptt-outer.receiving{
+  animation:pttRX 0.6s ease-in-out infinite alternate;
+  border-color:var(--yellow);
+  background:radial-gradient(circle,rgba(255,204,0,0.06) 0%,transparent 70%);
+}
+@keyframes pttRX{0%{box-shadow:0 0 0 0 rgba(255,204,0,0.3)}100%{box-shadow:0 0 0 20px rgba(255,204,0,0)}}
+
+.ptt-btn{
+  width:100px;height:100px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%,#2a3a2a,#111811);
+  border:3px solid #1e2a1e;
+  box-shadow:
+    0 6px 20px rgba(0,0,0,0.8),
+    inset 0 2px 0 rgba(255,255,255,0.06),
+    inset 0 -2px 0 rgba(0,0,0,0.5);
+  cursor:pointer;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:4px;
+  user-select:none;-webkit-user-select:none;
+  transition:all 0.08s;
+  position:relative;overflow:hidden;
+  -webkit-tap-highlight-color:transparent;
+}
+.ptt-btn::before{
+  content:'';position:absolute;inset:0;border-radius:50%;
+  background:radial-gradient(circle at 50% 20%,rgba(255,255,255,0.08),transparent 60%);
+}
+.ptt-btn:active,.ptt-btn.pressed{
+  transform:scale(0.93) translateY(3px);
+  box-shadow:0 2px 8px rgba(0,0,0,0.8),inset 0 2px 6px rgba(0,0,0,0.5);
+  background:radial-gradient(circle at 35% 30%,#1e2e1e,#0d120d);
+  border-color:var(--red);
+}
+.ptt-icon{font-size:1.8rem;position:relative;z-index:1;}
+.ptt-label{
+  font-family:'Orbitron',sans-serif;font-weight:700;
+  font-size:0.5rem;letter-spacing:2px;color:var(--muted);
+  position:relative;z-index:1;
+}
+.ptt-btn.pressed .ptt-label{color:var(--red);}
+.ptt-btn.receiving-state .ptt-label{color:var(--yellow);}
+
+/* TX/RX indicators */
+.tx-rx-row{
+  display:flex;justify-content:space-between;
+  padding:0 10px;margin-bottom:8px;
+}
+.tx-light,.rx-light{
+  display:flex;align-items:center;gap:5px;
+  font-family:'Share Tech Mono',monospace;font-size:0.6rem;letter-spacing:1px;
+}
+.light-dot{
+  width:8px;height:8px;border-radius:50%;
+  background:var(--muted2);transition:all 0.1s;
+}
+.tx-light.on .light-dot{background:var(--red);box-shadow:0 0 8px var(--red);}
+.rx-light.on .light-dot{background:var(--yellow);box-shadow:0 0 8px var(--yellow);}
+.tx-light.on{color:var(--red);}
+.rx-light.on{color:var(--yellow);}
+
+/* Bottom buttons */
+.bottom-btns{display:flex;gap:8px;margin-top:10px;}
+.side-btn{
+  flex:1;padding:9px 6px;
+  background:#0d130d;border:1px solid #182018;
+  border-radius:8px;cursor:pointer;
+  font-family:'Share Tech Mono',monospace;font-size:0.62rem;
+  color:var(--muted);letter-spacing:1px;text-align:center;
+  transition:all 0.2s;
+}
+.side-btn:hover{border-color:var(--green-dim);color:var(--green);}
+.side-btn.active{border-color:var(--green-dim);color:var(--green);background:rgba(0,255,136,0.05);}
+
+/* Call log */
+.call-log{
+  margin-top:12px;
+  background:var(--lcd);border:1px solid #0a140a;
+  border-radius:8px;padding:10px 12px;max-height:100px;overflow-y:auto;
+}
+.log-entry{
+  font-family:'Share Tech Mono',monospace;font-size:0.65rem;
+  color:rgba(0,255,136,0.5);padding:2px 0;
+  border-bottom:1px solid rgba(0,255,136,0.05);
+  display:flex;justify-content:space-between;
+}
+.log-entry:last-child{border:none;}
+.log-entry.tx-log{color:rgba(255,51,85,0.6);}
+.log-entry.rx-log{color:rgba(255,204,0,0.6);}
+
+/* ── INTERCOM RING SCREEN ─────────────────────────────── */
+#incoming{
+  display:none;position:fixed;inset:0;z-index:500;
+  background:rgba(0,0,0,0.95);
+  flex-direction:column;align-items:center;justify-content:center;
+  gap:20px;
+}
+.incoming-pulse{
+  width:120px;height:120px;border-radius:50%;
+  background:rgba(0,255,136,0.1);border:3px solid var(--green);
+  display:flex;align-items:center;justify-content:center;font-size:3rem;
+  animation:incomingPulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes incomingPulse{0%{transform:scale(0.95);box-shadow:0 0 0 0 rgba(0,255,136,0.4)}100%{transform:scale(1.05);box-shadow:0 0 0 30px rgba(0,255,136,0)}}
+.incoming-title{
+  font-family:'Orbitron',sans-serif;font-weight:700;
+  font-size:1.1rem;color:var(--green);letter-spacing:3px;
+  text-shadow:0 0 20px rgba(0,255,136,0.5);
+}
+.incoming-sub{font-family:'Share Tech Mono',monospace;font-size:0.8rem;color:var(--muted);letter-spacing:2px;}
+.incoming-btns{display:flex;gap:16px;}
+.ans-btn,.dec-btn{
+  width:64px;height:64px;border-radius:50%;border:none;
+  font-size:1.5rem;cursor:pointer;transition:transform 0.1s;
+}
+.ans-btn{background:var(--green);box-shadow:0 0 20px rgba(0,255,136,0.4);}
+.ans-btn:hover{transform:scale(1.05);}
+.dec-btn{background:var(--red);box-shadow:0 0 20px rgba(255,51,85,0.4);}
+.dec-btn:hover{transform:scale(1.05);}
+
+/* ── VOICE LEVEL METER ────────────────────────────────── */
+.vol-meter{
+  display:flex;gap:2px;align-items:flex-end;height:20px;
+}
+.vol-seg{
+  width:4px;border-radius:1px;background:var(--muted2);
+  transition:background 0.05s, height 0.05s;
+}
+
+/* scrollbar */
+::-webkit-scrollbar{width:3px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
+
+/* Mode tabs */
+.mode-tabs{display:flex;gap:4px;margin-bottom:12px;}
+.mode-tab{
+  flex:1;padding:8px;background:var(--card);border:1px solid var(--border2);
+  border-radius:8px;font-family:'Share Tech Mono',monospace;font-size:0.65rem;
+  color:var(--muted);cursor:pointer;text-align:center;letter-spacing:1px;
+  transition:all 0.2s;
+}
+.mode-tab.active{border-color:var(--green-dim);color:var(--green);background:rgba(0,255,136,0.05);}
+</style>
+</head>
+<body>
+
+<!-- ═══ SETUP ════════════════════════════════════════════════════ -->
+<div id="setup">
+  <div class="device-logo">
+    <div class="device-name">VoiceCast</div>
+    <div class="device-model">// WALKIE-TALKIE & INTERCOM SYSTEM //</div>
+  </div>
+
+  <div id="saved-bar" style="display:none" class="saved-bar">
+    <span style="color:var(--green)">▶</span> Saved session found — auto connecting...
+  </div>
+
+  <div class="lcd-panel">
+    <div class="lcd-label">// Channel / Room Code</div>
+    <div class="setup-row">
+      <input class="wt-input" id="ch-inp" type="text" placeholder="e.g. CH-SURESH-01" maxlength="24" oninput="this.value=this.value.toUpperCase()"/>
+      <button class="btn-rand" onclick="genCh()">🎲 GEN</button>
+    </div>
+    <div style="font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:var(--muted);margin-top:6px;letter-spacing:1px;">SAME CHANNEL ON BOTH DEVICES</div>
+  </div>
+
+  <div class="role-row">
+    <div class="role-btn active" id="rb-mobile" onclick="setRole('mobile')">
+      <span class="role-icon">📱</span>
+      <div class="role-label">MOBILE</div>
+      <div class="role-sub">Phone / Field unit</div>
+    </div>
+    <div class="role-btn" id="rb-pc" onclick="setRole('pc')">
+      <span class="role-icon">🖥️</span>
+      <div class="role-label">BASE STATION</div>
+      <div class="role-sub">Home PC / Desk unit</div>
+    </div>
+  </div>
+
+  <button class="btn-connect" id="btn-conn" onclick="doConnect()">◉ POWER ON / CONNECT</button>
+
+  <div class="status-line">
+    <div class="sig-dot" id="sdot"></div>
+    <span id="stext">STANDBY</span>
+  </div>
+
+  <div style="text-align:center;font-family:'Share Tech Mono',monospace;font-size:0.6rem;color:var(--muted2);margin-top:4px;cursor:pointer;" id="clr-link" onclick="clearSaved()" style="display:none">
+    [ CLEAR SAVED ]
+  </div>
+</div>
+
+<!-- ═══ WALKIE TALKIE DEVICE UI ═══════════════════════════════════ -->
+<div id="walkie">
+  <div class="antenna"></div>
+
+  <div class="device-body">
+
+    <!-- LCD Screen -->
+    <div class="device-lcd">
+      <div class="lcd-row">
+        <div>
+          <div class="lcd-ch" id="lcd-ch">CH: —</div>
+        </div>
+        <div class="lcd-signal" id="lcd-sig">
+          <div class="sig-bar" id="sb1"></div>
+          <div class="sig-bar" id="sb2"></div>
+          <div class="sig-bar" id="sb3"></div>
+          <div class="sig-bar" id="sb4"></div>
+          <div class="sig-bar" id="sb5"></div>
+        </div>
+      </div>
+      <div class="lcd-status-big" id="lcd-status">STANDBY</div>
+      <div class="lcd-status-sub" id="lcd-sub">HOLD PTT TO TRANSMIT</div>
+
+      <!-- Waveform -->
+      <div class="waveform" id="waveform">
+        <div class="wave-bar" id="wb0"></div><div class="wave-bar" id="wb1"></div>
+        <div class="wave-bar" id="wb2"></div><div class="wave-bar" id="wb3"></div>
+        <div class="wave-bar" id="wb4"></div><div class="wave-bar" id="wb5"></div>
+        <div class="wave-bar" id="wb6"></div><div class="wave-bar" id="wb7"></div>
+        <div class="wave-bar" id="wb8"></div><div class="wave-bar" id="wb9"></div>
+        <div class="wave-bar" id="wb10"></div><div class="wave-bar" id="wb11"></div>
+        <div class="wave-bar" id="wb12"></div><div class="wave-bar" id="wb13"></div>
+        <div class="wave-bar" id="wb14"></div>
+      </div>
+    </div>
+
+    <!-- TX / RX lights -->
+    <div class="tx-rx-row">
+      <div class="tx-light" id="tx-light"><div class="light-dot"></div> TX</div>
+      <div class="vol-meter" id="vol-meter">
+        <div class="vol-seg" id="vs0" style="height:4px"></div>
+        <div class="vol-seg" id="vs1" style="height:4px"></div>
+        <div class="vol-seg" id="vs2" style="height:4px"></div>
+        <div class="vol-seg" id="vs3" style="height:4px"></div>
+        <div class="vol-seg" id="vs4" style="height:4px"></div>
+        <div class="vol-seg" id="vs5" style="height:4px"></div>
+        <div class="vol-seg" id="vs6" style="height:4px"></div>
+        <div class="vol-seg" id="vs7" style="height:4px"></div>
+      </div>
+      <div class="rx-light" id="rx-light"><div class="light-dot"></div> RX</div>
+    </div>
+
+    <!-- Knobs -->
+    <div class="knobs-row">
+      <div class="knob-group">
+        <div class="knob-label">VOL</div>
+        <div class="knob" id="vol-knob" onclick="cycleVol()"></div>
+        <div class="knob-val" id="vol-val">MAX</div>
+      </div>
+      <div style="flex:2;text-align:center;">
+        <!-- Speaker grille -->
+        <div class="speaker-grille">
+          <div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div>
+          <div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div>
+          <div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div>
+          <div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div>
+          <div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div>
+          <div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div><div class="grille-dot"></div>
+        </div>
+      </div>
+      <div class="knob-group">
+        <div class="knob-label">SQ</div>
+        <div class="knob" id="sq-knob"></div>
+        <div class="knob-val">AUTO</div>
+      </div>
+    </div>
+
+    <!-- PTT BUTTON -->
+    <div class="ptt-area">
+      <div class="ptt-outer" id="ptt-outer">
+        <button class="ptt-btn" id="ptt-btn"
+          onmousedown="pttDown()" onmouseup="pttUp()" onmouseleave="pttUp()"
+          ontouchstart="pttDown(event)" ontouchend="pttUp(event)" ontouchcancel="pttUp(event)">
+          <span class="ptt-icon">🎙️</span>
+          <span class="ptt-label" id="ptt-label">HOLD TO TALK</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Bottom buttons -->
+    <div class="bottom-btns">
+      <div class="side-btn" id="call-btn" onclick="sendCall()">📞 CALL</div>
+      <div class="side-btn active" id="mode-btn" onclick="toggleMode()">🎙 PTT MODE</div>
+      <div class="side-btn" onclick="goBack()">⚙ SETUP</div>
+    </div>
+
+    <!-- Call log -->
+    <div class="call-log" id="call-log">
+      <div class="log-entry">[ SYSTEM READY ]</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ═══ INCOMING CALL SCREEN ═════════════════════════════════════ -->
+<div id="incoming">
+  <div class="incoming-pulse">📞</div>
+  <div class="incoming-title">INCOMING CALL</div>
+  <div class="incoming-sub" id="inc-from">FROM: REMOTE UNIT</div>
+  <div class="incoming-btns">
+    <button class="ans-btn" onclick="answerCall()">📞</button>
+    <button class="dec-btn" onclick="declineCall()">📵</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
+const S = {
+  role: 'mobile',
+  channel: '',
+  client: null,
+  isConn: false,
+  isConnecting: false,
+  reconnTimer: null,
+
+  // PTT / voice
+  isTransmitting: false,
+  isReceiving: false,
+  mediaStream: null,
+  mediaRecorder: null,
+  audioChunks: [],
+  audioCtx: null,
+  analyser: null,
+  waveAnimId: null,
+  volLevel: 1.0,
+  volSteps: [0.2, 0.5, 0.8, 1.0],
+  volIdx: 3,
+  volLabels: ['LOW','MED','HIGH','MAX'],
+
+  // Intercom mode
+  mode: 'ptt', // 'ptt' or 'intercom'
+
+  // WebRTC (intercom)
+  pc: null,
+  iceCandidateQueue: [],
+  callActive: false,
+};
+const SK = 'voicecast_v1';
+
+// ═══════════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════════
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = loadS();
+  if (saved) {
+    document.getElementById('ch-inp').value = saved.channel || '';
+    setRole(saved.role || 'mobile');
+    document.getElementById('saved-bar').style.display = 'flex';
+    document.getElementById('clr-link').style.display = 'block';
+    setTimeout(() => doConnect(true), 700);
+  }
+});
+
+function loadS() { try { return JSON.parse(localStorage.getItem(SK)); } catch { return null; } }
+function saveS() { try { localStorage.setItem(SK, JSON.stringify({ channel: S.channel, role: S.role })); } catch {} }
+function clearSaved() { localStorage.removeItem(SK); location.reload(); }
+
+// ═══════════════════════════════════════════════════════════════════
+// ROLE + CHANNEL
+// ═══════════════════════════════════════════════════════════════════
+function setRole(r) {
+  S.role = r;
+  document.getElementById('rb-mobile').classList.toggle('active', r==='mobile');
+  document.getElementById('rb-pc').classList.toggle('active', r==='pc');
+}
+
+function genCh() {
+  const codes = ['ALPHA','BRAVO','CHARLIE','DELTA','ECHO','FOXTROT'];
+  const n = Math.floor(Math.random()*900)+100;
+  document.getElementById('ch-inp').value = 'CH-' + codes[Math.floor(Math.random()*codes.length)] + '-' + n;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MQTT CONNECTION
+// ═══════════════════════════════════════════════════════════════════
+function doConnect(silent=false) {
+  if (S.isConnecting) return;
+  const ch = document.getElementById('ch-inp').value.trim().replace(/[^a-zA-Z0-9\-_]/g,'').toUpperCase();
+  if (!ch) { if (!silent) alert('Enter a channel code!'); return; }
+  S.channel = ch;
+  S.isConnecting = true;
+  saveS();
+
+  document.getElementById('btn-conn').disabled = true;
+  setSdot('blink'); setStext('CONNECTING...');
+
+  const cid = 'vc_' + Math.random().toString(36).substr(2,9);
+  S.client = new Paho.Client('broker.emqx.io', 8084, '/mqtt', cid);
+
+  S.client.onConnectionLost = () => {
+    S.isConn = false; S.isConnecting = false;
+    setLcdStatus('NO SIGNAL','RECONNECTING...');
+    clearTimeout(S.reconnTimer);
+    S.reconnTimer = setTimeout(() => doConnect(true), 4000);
+    setSignalBars(0);
+  };
+
+  S.client.onMessageArrived = (msg) => {
+    try { handleMsg(JSON.parse(msg.payloadString)); } catch(e) {}
+  };
+
+  S.client.connect({
+    useSSL: true, timeout: 12, keepAliveInterval: 25,
+    onSuccess: () => {
+      S.isConn = true; S.isConnecting = false;
+      document.getElementById('btn-conn').disabled = false;
+      setSdot('conn'); setStext('CONNECTED · ' + S.channel);
+
+      const topics = ['vc/'+S.channel+'/ctrl', 'vc/'+S.channel+'/audio'];
+      topics.forEach(t => S.client.subscribe(t));
+
+      setSignalBars(5);
+      showDevice();
+    },
+    onFailure: () => {
+      S.isConnecting = false;
+      document.getElementById('btn-conn').disabled = false;
+      setSdot('err'); setStext('FAILED — RETRYING...');
+      clearTimeout(S.reconnTimer);
+      S.reconnTimer = setTimeout(() => doConnect(true), 4000);
+    }
+  });
+}
+
+function pub(topic, payload) {
+  if (!S.client || !S.client.isConnected()) return;
+  const m = new Paho.Message(JSON.stringify({ ...payload, from: S.role }));
+  m.destinationName = 'vc/' + S.channel + '/' + topic;
+  m.qos = 0;
+  S.client.send(m);
+}
+
+function pubAudio(topic, payload) {
+  if (!S.client || !S.client.isConnected()) return;
+  const m = new Paho.Message(JSON.stringify({ ...payload, from: S.role }));
+  m.destinationName = 'vc/' + S.channel + '/' + topic;
+  m.qos = 0;
+  try { S.client.send(m); } catch(e) {}
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// MESSAGE HANDLER
+// ═══════════════════════════════════════════════════════════════════
+function handleMsg(d) {
+  if (d.from === S.role) return; // ignore own
+
+  switch(d.type) {
+    case 'ptt_start':
+      startReceiving();
+      break;
+    case 'ptt_stop':
+      stopReceiving();
+      break;
+    case 'call_ring':
+      showIncoming(d.from);
+      break;
+    case 'call_answer':
+      onCallAnswered();
+      break;
+    case 'call_decline':
+      onCallDeclined();
+      break;
+    case 'call_end':
+      endCall();
+      break;
+    case 'rtc_offer':
+      handleOffer(d.sdp);
+      break;
+    case 'rtc_answer':
+      handleAnswer(d.sdp);
+      break;
+    case 'rtc_ice':
+      handleIce(d.candidate);
+      break;
+    case 'audio_chunk':
+      playAudioChunk(d.data);
+      break;
+    case 'ping':
+      setSignalBars(5);
+      addLog('PING FROM ' + d.from.toUpperCase(), 'rx');
+      break;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PTT — PRESS TO TALK
+// ═══════════════════════════════════════════════════════════════════
+function pttDown(e) {
+  if (e) e.preventDefault();
+  if (S.isReceiving) return; // can't TX while RX
+  if (S.isTransmitting) return;
+  startTransmitting();
+}
+
+function pttUp(e) {
+  if (e) e.preventDefault();
+  if (!S.isTransmitting) return;
+  stopTransmitting();
+}
+
+async function startTransmitting() {
+  S.isTransmitting = true;
+
+  // Visual
+  setLcdStatus('TRANSMITTING','RELEASE TO STOP');
+  document.getElementById('ptt-outer').classList.add('transmitting');
+  document.getElementById('ptt-btn').classList.add('pressed');
+  document.getElementById('ptt-label').textContent = 'TRANSMITTING';
+  setTX(true); setRX(false);
+  startWaveAnim(true);
+  addLog('TX STARTED', 'tx');
+
+  // Signal other device
+  pub('ctrl', { type: 'ptt_start' });
+
+  // Capture mic
+  try {
+    S.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: true, noiseSuppression: true, sampleRate: 16000
+    }});
+    beep(800, 0.08, 0.06, 'sine'); // start beep
+
+    // Setup analyser for level meter
+    S.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = S.audioCtx.createMediaStreamSource(S.mediaStream);
+    S.analyser = S.audioCtx.createAnalyser();
+    S.analyser.fftSize = 256;
+    src.connect(S.analyser);
+    startLevelMeter();
+
+    // Record in chunks and send
+    S.mediaRecorder = new MediaRecorder(S.mediaStream, { mimeType: getSupportedMime() });
+    S.audioChunks = [];
+
+    S.mediaRecorder.ondataavailable = async (e) => {
+      if (e.data.size > 0 && S.isTransmitting) {
+        // Convert to base64 and send via MQTT
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const b64 = reader.result.split(',')[1];
+          pubAudio('audio', { type: 'audio_chunk', data: b64, mime: getSupportedMime() });
+        };
+        reader.readAsDataURL(e.data);
+      }
+    };
+
+    S.mediaRecorder.start(200); // send chunk every 200ms
+  } catch(err) {
+    addLog('MIC ERROR: ' + err.message.substring(0,30), 'tx');
+    stopTransmitting();
+  }
+}
+
+function stopTransmitting() {
+  if (!S.isTransmitting) return;
+  S.isTransmitting = false;
+
+  // Stop recording
+  if (S.mediaRecorder && S.mediaRecorder.state !== 'inactive') {
+    S.mediaRecorder.stop();
+  }
+  if (S.mediaStream) {
+    S.mediaStream.getTracks().forEach(t => t.stop());
+    S.mediaStream = null;
+  }
+  if (S.audioCtx) { try { S.audioCtx.close(); } catch(e){} S.audioCtx = null; }
+  S.analyser = null;
+
+  beep(600, 0.06, 0.08, 'sine'); // end beep
+
+  // Visual
+  setLcdStatus('STANDBY','HOLD PTT TO TRANSMIT');
+  document.getElementById('ptt-outer').classList.remove('transmitting');
+  document.getElementById('ptt-btn').classList.remove('pressed');
+  document.getElementById('ptt-label').textContent = 'HOLD TO TALK';
+  setTX(false);
+  stopWaveAnim();
+  resetLevelMeter();
+  addLog('TX ENDED', 'tx');
+
+  // Signal
+  pub('ctrl', { type: 'ptt_stop' });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RECEIVING
+// ═══════════════════════════════════════════════════════════════════
+function startReceiving() {
+  S.isReceiving = true;
+  setLcdStatus('RECEIVING','REMOTE UNIT SPEAKING');
+  document.getElementById('ptt-outer').classList.add('receiving');
+  document.getElementById('ptt-btn').classList.add('receiving-state');
+  document.getElementById('ptt-label').textContent = '◀ RECEIVING';
+  setRX(true);
+  startWaveAnim(false);
+  addLog('RX STARTED', 'rx');
+  playBeepRX();
+}
+
+function stopReceiving() {
+  S.isReceiving = false;
+  setLcdStatus('STANDBY','HOLD PTT TO TRANSMIT');
+  document.getElementById('ptt-outer').classList.remove('receiving');
+  document.getElementById('ptt-btn').classList.remove('receiving-state');
+  document.getElementById('ptt-label').textContent = 'HOLD TO TALK';
+  setRX(false);
+  stopWaveAnim();
+  resetLevelMeter();
+  addLog('RX ENDED', 'rx');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIO PLAYBACK (received chunks)
+// ═══════════════════════════════════════════════════════════════════
+const audioQueue = [];
+let isPlayingQueue = false;
+
+async function playAudioChunk(b64data) {
+  try {
+    const mime = getSupportedMime();
+    const binary = atob(b64data);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    audioQueue.push(url);
+    if (!isPlayingQueue) drainQueue();
+  } catch(e) {}
+}
+
+async function drainQueue() {
+  if (audioQueue.length === 0) { isPlayingQueue = false; return; }
+  isPlayingQueue = true;
+  const url = audioQueue.shift();
+  const audio = new Audio(url);
+  audio.volume = S.volLevel;
+  animateRXLevel();
+  audio.onended = () => { URL.revokeObjectURL(url); drainQueue(); };
+  audio.onerror = () => { URL.revokeObjectURL(url); drainQueue(); };
+  try { await audio.play(); } catch(e) { drainQueue(); }
+}
+
+let rxLevelAnim = null;
+function animateRXLevel() {
+  clearInterval(rxLevelAnim);
+  rxLevelAnim = setInterval(() => {
+    for (let i = 0; i < 8; i++) {
+      const h = Math.random() * 16 + 2;
+      const el = document.getElementById('vs' + i);
+      if (el) {
+        el.style.height = h + 'px';
+        el.style.background = h > 12 ? 'var(--red)' : h > 8 ? 'var(--yellow)' : 'var(--green)';
+      }
+    }
+    for (let i = 0; i < 15; i++) {
+      const h = Math.random() * 22 + 2;
+      const el = document.getElementById('wb' + i);
+      if (el) el.style.height = h + 'px';
+    }
+  }, 80);
+}
+
+function getSupportedMime() {
+  const types = ['audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus','audio/mp4'];
+  return types.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || 'audio/webm';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// INTERCOM CALL (WebRTC)
+// ═══════════════════════════════════════════════════════════════════
+function toggleMode() {
+  S.mode = S.mode === 'ptt' ? 'intercom' : 'ptt';
+  const btn = document.getElementById('mode-btn');
+  btn.textContent = S.mode === 'ptt' ? '🎙 PTT MODE' : '📞 INTERCOM';
+  btn.className = 'side-btn' + (S.mode === 'intercom' ? ' active' : ' active');
+  setLcdStatus('STANDBY', S.mode === 'ptt' ? 'HOLD PTT TO TRANSMIT' : 'PRESS CALL FOR INTERCOM');
+  addLog('MODE: ' + S.mode.toUpperCase(), 'rx');
+}
+
+function sendCall() {
+  if (S.mode === 'intercom') {
+    startIntercomCall();
+  } else {
+    // PTT mode: just a ping
+    pub('ctrl', { type: 'ping' });
+    addLog('PING SENT', 'tx');
+    beep(1000, 0.1, 0.1);
+  }
+}
+
+async function startIntercomCall() {
+  if (S.callActive) { endCall(); return; }
+  pub('ctrl', { type: 'call_ring' });
+  setLcdStatus('CALLING...','RINGING REMOTE UNIT');
+  addLog('OUTGOING CALL', 'tx');
+  ringSound();
+}
+
+function showIncoming(from) {
+  document.getElementById('inc-from').textContent = 'FROM: ' + from.toUpperCase() + ' UNIT';
+  document.getElementById('incoming').style.display = 'flex';
+  ringSound();
+  addLog('INCOMING CALL FROM ' + from.toUpperCase(), 'rx');
+}
+
+async function answerCall() {
+  document.getElementById('incoming').style.display = 'none';
+  stopRingSound();
+  pub('ctrl', { type: 'call_answer' });
+  await setupWebRTC(false); // answerer
+  addLog('CALL ANSWERED', 'rx');
+}
+
+function declineCall() {
+  document.getElementById('incoming').style.display = 'none';
+  stopRingSound();
+  pub('ctrl', { type: 'call_decline' });
+  addLog('CALL DECLINED', 'rx');
+}
+
+async function onCallAnswered() {
+  stopRingSound();
+  setLcdStatus('CALL ACTIVE','INTERCOM CONNECTED');
+  document.getElementById('call-btn').textContent = '📵 END';
+  addLog('CALL CONNECTED', 'tx');
+  await setupWebRTC(true); // caller is offerer
+  S.callActive = true;
+}
+
+function onCallDeclined() {
+  stopRingSound();
+  setLcdStatus('CALL DECLINED','REMOTE UNIT BUSY');
+  addLog('CALL DECLINED BY REMOTE', 'rx');
+  setTimeout(() => setLcdStatus('STANDBY','PRESS CALL FOR INTERCOM'), 2000);
+}
+
+function endCall() {
+  if (S.pc) { S.pc.close(); S.pc = null; }
+  if (S.mediaStream) { S.mediaStream.getTracks().forEach(t=>t.stop()); S.mediaStream = null; }
+  S.callActive = false;
+  pub('ctrl', { type: 'call_end' });
+  setLcdStatus('STANDBY','PRESS CALL FOR INTERCOM');
+  document.getElementById('call-btn').textContent = '📞 CALL';
+  addLog('CALL ENDED', 'tx');
+}
+
+async function setupWebRTC(isOfferer) {
+  const config = { iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+  ]};
+  S.pc = new RTCPeerConnection(config);
+
+  // Get mic
+  try {
+    S.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation:true, noiseSuppression:true }});
+    S.mediaStream.getTracks().forEach(t => S.pc.addTrack(t, S.mediaStream));
+  } catch(e) { addLog('MIC ERROR', 'tx'); return; }
+
+  // Play remote audio
+  S.pc.ontrack = (e) => {
+    const audio = new Audio();
+    audio.srcObject = e.streams[0];
+    audio.volume = S.volLevel;
+    audio.autoplay = true;
+    setLcdStatus('CALL ACTIVE','INTERCOM LIVE');
+    animateRXLevel();
+  };
+
+  S.pc.onicecandidate = (e) => {
+    if (e.candidate) pub('ctrl', { type: 'rtc_ice', candidate: e.candidate });
+  };
+
+  if (isOfferer) {
+    const offer = await S.pc.createOffer();
+    await S.pc.setLocalDescription(offer);
+    pub('ctrl', { type: 'rtc_offer', sdp: S.pc.localDescription });
+  }
+}
+
+async function handleOffer(sdp) {
+  if (!S.pc) return;
+  await S.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  const answer = await S.pc.createAnswer();
+  await S.pc.setLocalDescription(answer);
+  pub('ctrl', { type: 'rtc_answer', sdp: S.pc.localDescription });
+  // drain queued ICE
+  S.iceCandidateQueue.forEach(c => S.pc.addIceCandidate(c));
+  S.iceCandidateQueue = [];
+}
+
+async function handleAnswer(sdp) {
+  if (!S.pc) return;
+  await S.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+  S.iceCandidateQueue.forEach(c => S.pc.addIceCandidate(c));
+  S.iceCandidateQueue = [];
+}
+
+async function handleIce(candidate) {
+  if (S.pc && S.pc.remoteDescription) {
+    try { await S.pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch(e) {}
+  } else {
+    S.iceCandidateQueue.push(new RTCIceCandidate(candidate));
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AUDIO UTILS
+// ═══════════════════════════════════════════════════════════════════
+function beep(freq=800, vol=0.1, dur=0.08, type='sine') {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.connect(g); g.connect(ctx.destination);
+    osc.frequency.value = freq; osc.type = type;
+    g.gain.setValueAtTime(vol, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + dur + 0.01);
+  } catch(e) {}
+}
+
+function playBeepRX() { beep(1200, 0.08, 0.05); setTimeout(() => beep(1000, 0.06, 0.05), 80); }
+
+let ringInterval = null;
+function ringSound() {
+  ringInterval = setInterval(() => { beep(800,0.15,0.1); setTimeout(()=>beep(1000,0.12,0.1),150); }, 1000);
+}
+function stopRingSound() { clearInterval(ringInterval); ringInterval = null; }
+
+// Level meter from microphone
+function startLevelMeter() {
+  if (!S.analyser) return;
+  const data = new Uint8Array(S.analyser.frequencyBinCount);
+  function tick() {
+    if (!S.analyser) return;
+    S.analyser.getByteFrequencyData(data);
+    const avg = data.reduce((a,b)=>a+b,0)/data.length;
+    const level = Math.min(8, Math.floor(avg / 12));
+    for (let i=0;i<8;i++) {
+      const el = document.getElementById('vs'+i);
+      if (el) {
+        const h = i < level ? (4 + i*3) : 4;
+        el.style.height = h + 'px';
+        el.style.background = i>=6?'var(--red)':i>=4?'var(--yellow)':'var(--green)';
+      }
+    }
+    requestAnimationFrame(tick);
+  }
+  tick();
+}
+
+function resetLevelMeter() {
+  clearInterval(rxLevelAnim);
+  for (let i=0;i<8;i++) {
+    const el = document.getElementById('vs'+i);
+    if (el) { el.style.height='4px'; el.style.background='var(--muted2)'; }
+  }
+  for (let i=0;i<15;i++) {
+    const el = document.getElementById('wb'+i);
+    if (el) el.style.height='4px';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// WAVEFORM ANIMATION
+// ═══════════════════════════════════════════════════════════════════
+function startWaveAnim(isTX) {
+  document.getElementById('waveform').classList.add('active');
+  S.waveAnimId = setInterval(() => {
+    for (let i=0;i<15;i++) {
+      const el = document.getElementById('wb'+i);
+      if (el) {
+        const h = isTX ? (Math.random()*18+2) : (Math.random()*14+2);
+        el.style.height = h + 'px';
+      }
+    }
+  }, 80);
+}
+
+function stopWaveAnim() {
+  clearInterval(S.waveAnimId);
+  document.getElementById('waveform').classList.remove('active');
+  for (let i=0;i<15;i++) {
+    const el = document.getElementById('wb'+i);
+    if (el) el.style.height = '4px';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// UI HELPERS
+// ═══════════════════════════════════════════════════════════════════
+function showDevice() {
+  document.getElementById('setup').style.display = 'none';
+  document.getElementById('walkie').style.display = 'block';
+  document.getElementById('lcd-ch').textContent = 'CH: ' + S.channel;
+  setLcdStatus('READY', 'HOLD PTT TO TRANSMIT');
+  addLog('CONNECTED TO ' + S.channel, 'rx');
+  addLog('ROLE: ' + S.role.toUpperCase(), 'rx');
+  beep(600,0.1,0.1); setTimeout(()=>beep(800,0.1,0.1),120); setTimeout(()=>beep(1000,0.1,0.12),240);
+}
+
+function goBack() {
+  clearTimeout(S.reconnTimer);
+  if (S.callActive) endCall();
+  if (S.isTransmitting) stopTransmitting();
+  if (S.client && S.client.isConnected()) { try{S.client.disconnect();}catch(e){} }
+  S.client = null; S.isConn = false; S.isConnecting = false;
+  document.getElementById('setup').style.display = 'flex';
+  document.getElementById('walkie').style.display = 'none';
+  setSdot(''); setStext('STANDBY');
+}
+
+function setLcdStatus(main, sub) {
+  document.getElementById('lcd-status').textContent = main;
+  document.getElementById('lcd-sub').textContent = sub;
+}
+
+function setTX(on) { document.getElementById('tx-light').className = on ? 'tx-light on' : 'tx-light'; }
+function setRX(on) { document.getElementById('rx-light').className = on ? 'rx-light on' : 'rx-light'; }
+
+function setSignalBars(n) {
+  for (let i=1;i<=5;i++) {
+    const el = document.getElementById('sb'+i);
+    if (el) el.className = 'sig-bar' + (i<=n?' active':'');
+  }
+}
+
+function addLog(msg, type='rx') {
+  const log = document.getElementById('call-log');
+  const entry = document.createElement('div');
+  entry.className = 'log-entry ' + (type==='tx'?'tx-log':'rx-log');
+  const t = new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  entry.innerHTML = `<span>${msg}</span><span>${t}</span>`;
+  log.appendChild(entry);
+  log.scrollTop = log.scrollHeight;
+}
+
+function cycleVol() {
+  S.volIdx = (S.volIdx + 1) % S.volSteps.length;
+  S.volLevel = S.volSteps[S.volIdx];
+  document.getElementById('vol-val').textContent = S.volLabels[S.volIdx];
+  beep(600 + S.volIdx*100, 0.05, 0.06);
+}
+
+function setSdot(c) { document.getElementById('sdot').className = 'sig-dot ' + c; }
+function setStext(t) { document.getElementById('stext').textContent = t; }
+</script>
+</body>
+</html>
