@@ -347,7 +347,7 @@ function saveState() {
 function connectMQTT() {
   log('Connecting MQTT: broker.emqx.io:8084', 'in');
   setStat('st-mqtt','Connecting...','wait');
-  setBadge('CONNECTING', var('--orange'));
+  setBadge('CONNECTING');
 
   A.client = new Paho.Client('broker.emqx.io', 8084, '/mqtt', A.cid);
 
@@ -369,7 +369,7 @@ function connectMQTT() {
       A.isConn = true;
       log('✅ MQTT Connected!', 'ok');
       setStat('st-mqtt','Connected','ok');
-      setBadge('CONNECTED', '#059669');
+      setBadge('CONNECTED');
 
       // Subscribe to ALL possible topic formats
       const topics = [
@@ -440,15 +440,15 @@ function onMsg(m) {
         // Check if rooms match
         if (data.room && data.room !== A.room) {
           log('⚠️ ROOM MISMATCH! They are on: '+data.room+' You are on: '+A.room, 'er');
+          A._fixRoom = data.room;
           showAutoFix('ROOM MISMATCH DETECTED',
-            'Device "'+from+'" is on room '+data.room+' but you are on '+A.room,
-            () => {
-              // Auto-switch to their room
-              A.room = data.room;
+            'Device "' + from + '" is on room ' + data.room + ' but you are on ' + A.room,
+            function(){
+              A.room = A._fixRoom;
               saveState();
               updateRoomDisplay();
               reconnectNewRoom();
-              log('Auto-switched to room: '+A.room, 'ok');
+              log('Auto-switched to room: ' + A.room, 'ok');
             }, 'SYNC TO THEIR ROOM: ' + data.room);
         }
         setStat('st-peer', from+' online', 'ok');
@@ -518,13 +518,14 @@ function renderDevices(){
   const row=document.getElementById('dev-row');
   const ids=Object.keys(A.devices);
   let html=`<div class="dev-chip me"><div class="dd"></div>${esc(A.name)} (You)</div>`;
-  ids.forEach(id=>{
-    const d=A.devices[id];
-    const mismatch=d.room&&d.room!==A.room;
-    html+=`<div class="dev-chip ${mismatch?'mismatch':'other'}">
-      <div class="dd"></div>${esc(d.name)}
-      ${mismatch?'<span style="font-size:.65rem;margin-left:4px">⚠️ DIFF ROOM</span>':''}
-    </div>`;
+  ids.forEach(function(id){
+    var d = A.devices[id];
+    var mismatch = d.room && d.room !== A.room;
+    var chipClass = mismatch ? 'mismatch' : 'other';
+    html += '<div class="dev-chip ' + chipClass + '">';
+    html += '<div class="dd"></div>' + esc(d.name);
+    if (mismatch) html += '<span style="font-size:.65rem;margin-left:4px"> DIFF ROOM</span>';
+    html += '</div>';
   });
   if(!ids.length) html+='<div class="no-dev">No other device connected</div>';
   row.innerHTML=html;
@@ -556,9 +557,9 @@ function addMsg(from,text,dir){
   if(empty)list.innerHTML='';
   const d=document.createElement('div');
   d.className='msg-item '+dir;
-  d.innerHTML=`<div class="msg-from ${dir}">${dir==='out'?'📤 You':'📥 '+esc(from)}</div>
-    <div class="msg-text">${esc(text)}</div>
-    <div class="msg-time">${new Date().toLocaleTimeString()}</div>`;
+  d.innerHTML = '<div class="msg-from ' + dir + '">' + (dir==='out'?'Out: You':'In: '+esc(from)) + '</div>' +
+    '<div class="msg-text">' + esc(text) + '</div>' +
+    '<div class="msg-time">' + new Date().toLocaleTimeString() + '</div>';
   list.prepend(d);
   while(list.children.length>30)list.removeChild(list.lastChild);
   updateMsgCount();
@@ -760,17 +761,18 @@ async function runAllTests(){
 }
 
 function renderDiag(results){
-  const panel=document.getElementById('diag-panel');
-  panel.innerHTML=results.map(r=>`
-    <div class="diag-item">
-      <div class="diag-icon">${r.icon}</div>
-      <div class="diag-info">
-        <div class="diag-name" style="color:${r.ok?'var(--text)':'var(--red)'}">${r.name}</div>
-        <div class="diag-detail">${esc(r.detail||'')}</div>
-        ${r.fix?`<div class="diag-fix">⚡ ${esc(r.fix)}</div>`:''}
-      </div>
-    </div>
-  `).join('');
+  const panel = document.getElementById('diag-panel');
+  let html = '';
+  results.forEach(function(r){
+    html += '<div class="diag-item">';
+    html += '<div class="diag-icon">' + r.icon + '</div>';
+    html += '<div class="diag-info">';
+    html += '<div class="diag-name" style="color:' + (r.ok ? 'var(--text)' : 'var(--red)') + '">' + esc(r.name) + '</div>';
+    html += '<div class="diag-detail">' + esc(r.detail || '') + '</div>';
+    if (r.fix) html += '<div class="diag-fix">Fix: ' + esc(r.fix) + '</div>';
+    html += '</div></div>';
+  });
+  panel.innerHTML = html;
 }
 
 function checkRoomMismatch(){
@@ -788,14 +790,32 @@ function checkRoomMismatch(){
   }
 }
 
+// Store fix functions by id
+const fixRegistry = {};
+
 function showAutoFix(title, detail, fixFn, btnLabel){
-  const panel=document.getElementById('diag-panel');
-  const box=document.createElement('div');
-  box.className='auto-setup';
-  box.innerHTML=`<div class="auto-setup-title">${esc(title)}</div>
-    <div style="font-size:.75rem;color:var(--orange);white-space:pre-line">${esc(detail)}</div>
-    <button class="fix-btn" onclick="this.disabled=true;this.textContent='Fixing...';(${fixFn.toString()})();this.textContent='✅ Fixed!';this.style.background='var(--green)'">${esc(btnLabel)}</button>`;
+  const panel = document.getElementById('diag-panel');
+  const fixId = 'fix_' + Date.now();
+  fixRegistry[fixId] = fixFn;
+  const box = document.createElement('div');
+  box.className = 'auto-setup';
+  box.innerHTML =
+    '<div class="auto-setup-title">' + esc(title) + '</div>' +
+    '<div style="font-size:.75rem;color:var(--orange);white-space:pre-line">' + esc(detail) + '</div>' +
   panel.prepend(box);
+}
+
+function runFix(fixId, btn){
+  btn.disabled = true;
+  btn.textContent = 'Fixing...';
+  try {
+    if (fixRegistry[fixId]) fixRegistry[fixId]();
+    btn.textContent = 'Fixed!';
+    btn.style.background = '#059669';
+  } catch(e) {
+    btn.textContent = 'Error: ' + e.message;
+    log('Fix error: ' + e.message, 'er');
+  }
 }
 
 function reconnectNewRoom(){
@@ -841,11 +861,12 @@ function setStat(id,label,status){
   el.innerHTML='<div class="st-dot"></div>'+esc(label);
 }
 
-function setBadge(text){
-  document.getElementById('hdr-badge').textContent=text;
+function setBadge(text, color){
+  var el = document.getElementById('hdr-badge');
+  if(el) el.textContent = text;
 }
 
-function var_(v){return getComputedStyle(document.documentElement).getPropertyValue(v);}
+function getCSSVar(v){return getComputedStyle(document.documentElement).getPropertyValue(v);}
 
 // ═══════════════════════════════════════════════════════════
 // LOG
