@@ -367,6 +367,7 @@ body{font-family:'Inter',sans-serif;background:#ffffff;color:#000000;font-size:1
     <div>
       <div class="tb-name">VoiceCast</div>
       <div class="tb-ch" id="tb-ch">CH: — · —</div>
+      <div id="role-badge" style="font-size:.65rem;font-weight:800;background:#0047cc;color:#fff;border-radius:6px;padding:2px 7px;margin-top:2px;">—</div>
     </div>
     <div class="tb-r">
       <div class="sig"><div class="sv" id="sv1"></div><div class="sv" id="sv2"></div><div class="sv" id="sv3"></div><div class="sv" id="sv4"></div><div class="sv" id="sv5"></div></div>
@@ -840,6 +841,13 @@ function pttDown(e){
 function pttUp(e){if(e)e.preventDefault();if(!S.isTX)return;stopTX();}
 
 async function startTX(){
+  // PC has no mic — block PTT on PC, only allow on mobile
+  if(S.role==='pc'){
+    addLog('ℹ️ PC has no mic — use phone for PTT','sys');
+    setStatus('USE PHONE','📱 Press PTT on your mobile phone','');
+    setTimeout(()=>setStatus('READY','Hold PTT to transmit',''),2000);
+    return;
+  }
   S.isTX=true;
   setStatus('TRANSMITTING','🔴 Speak now — release when done','tx');
   document.getElementById('ptt-ring').className='ptt-ring tx';
@@ -879,7 +887,10 @@ function stopTX(){
 // ════════════════════════════════════════════════════════════
 function startRX(from){
   S.isRX=true;
-  setStatus('RECEIVING','🟠 '+(from||'Remote')+' is speaking...','rx');
+  // Flash the screen to show audio is coming
+  document.body.style.background='#fffde7';
+  setTimeout(()=>document.body.style.background='#ffffff',1000);
+  setStatus('RECEIVING','🟠 '+(from||'Remote')+' is speaking — LISTEN NOW','rx');
   document.getElementById('ptt-ring').className='ptt-ring rx';
   document.getElementById('ptt-btn').className='ptt-btn rx';
   document.getElementById('ptt-ico').textContent='🔊';
@@ -903,7 +914,9 @@ async function playChunk(b64,mime){
 }
 async function drain(){
   if(!aQ.length){aPlaying=false;return;}aPlaying=true;
-  const url=aQ.shift();const a=new Audio();a.src=url;a.volume=S.vols[S.volIdx];
+  const url=aQ.shift();const a=new Audio();a.src=url;
+  // Use maximum volume for received audio
+  a.volume=Math.max(S.vols[S.volIdx], 0.9);
   animRX();a.onended=()=>{URL.revokeObjectURL(url);drain();};a.onerror=()=>{URL.revokeObjectURL(url);drain();};
   try{await a.play();}catch(e){drain();}
 }
@@ -977,10 +990,15 @@ function addChatMsg(from,text,isSOS,isOut){
   const msgs=document.getElementById('chat-msgs');
   const d=document.createElement('div');
   d.className='msg-b '+(isSOS?'sos-msg':isOut?'out':'in');
-  const linked=escH(text).replace(/(https?:\/\/[^\s]+)/g,'<a href="$1" target="_blank" style="color:var(--blue)">$1</a>');
-  d.innerHTML=`${linked}<div class="msg-meta">${escH(from)} · ${nowTime()}</div>`;
-  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
-  if(!S.chatVisible){document.getElementById('chat-panel').classList.add('visible');S.chatVisible=true;}
+  const linked=escH(text).replace(/(https?:\/\/[^\s]+)/g,'<a href="$1" target="_blank" style="color:#0047cc;text-decoration:underline">$1</a>');
+  const fromColor = isOut ? '#007a38' : '#cc0000';
+  const fromLabel = isOut ? '📤 You' : '📥 '+escH(from);
+  d.innerHTML=`<div style="font-size:.75rem;font-weight:800;color:${fromColor};margin-bottom:3px">${fromLabel}</div>${linked}<div class="msg-meta" style="color:#333;font-size:.72rem;margin-top:4px">${nowTime()}</div>`;
+  msgs.appendChild(d);
+  msgs.scrollTop=msgs.scrollHeight;
+  // Always show chat panel when message arrives
+  document.getElementById('chat-panel').classList.add('visible');
+  S.chatVisible=true;
 }
 function closeChatPanel(){document.getElementById('chat-panel').classList.remove('visible');S.chatVisible=false;}
 
@@ -1147,10 +1165,22 @@ function showWalkie(){
   document.getElementById('scr-setup').classList.remove('on');
   document.getElementById('scr-walkie').classList.add('on');
   document.getElementById('tb-ch').textContent='CH: '+S.channel+' · '+S.myName;
-  setStatus('READY','Hold PTT button to transmit','');
+  if(S.role==='pc'){
+    setStatus('BASE STATION READY','📱 Speak from your mobile phone — PC listens only','');
+    document.getElementById('ptt-ico').textContent='🖥️';
+    document.getElementById('ptt-lbl').textContent='PC LISTENS';
+    document.getElementById('ptt-hint').textContent='PC has no mic — use your mobile phone to talk';
+  } else {
+    setStatus('READY','Hold PTT button to transmit','');
+  }
   setConn(true);renderUsers();
   addLog('✅ Connected · '+S.channel,'sys');document.getElementById('ver-conn-status').textContent='CONNECTED · '+S.channel;document.getElementById('ver-bar').style.background='#007a38';
   addLog('👤 '+S.myName+' ('+S.role+') · '+(S.backend==='mqtt'?'Public':'Private'),'sys');
+  const badge=document.getElementById('role-badge');
+  if(badge){
+    badge.textContent = S.role==='pc' ? '🖥 BASE STATION' : '📱 MOBILE';
+    badge.style.background = S.role==='pc' ? '#007a38' : '#0047cc';
+  }
   if(S.soundOn){beep(600,.08,.08);setTimeout(()=>beep(800,.08,.08),100);setTimeout(()=>beep(1000,.08,.1),200);}
 }
 function goSetup(){
