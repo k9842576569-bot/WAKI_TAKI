@@ -200,20 +200,20 @@ body{font-family:'Inter',sans-serif;background:#ffffff;color:#000000;font-size:1
 .act.sos-act .act-lb{color:var(--red)}
 
 /* Chat panel */
-.chat-panel{background:var(--white);border:1.5px solid var(--border);border-radius:13px;box-shadow:var(--sh);overflow:hidden;display:none}
-.chat-panel.visible{display:block}
+.chat-panel{background:#ffffff;border:2px solid #9aaabf;border-radius:13px;box-shadow:var(--sh);overflow:hidden;display:block}
+.chat-panel.visible{display:block}/* always visible */
 .chat-head{padding:9px 13px;border-bottom:1px solid var(--div);display:flex;align-items:center;justify-content:space-between}
 .chat-head-lbl{font-size:.66rem;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--blue)}
 .chat-msgs{max-height:140px;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;gap:5px}
-.msg-b{max-width:78%;padding:7px 11px;border-radius:12px;font-size:.8rem;line-height:1.4;word-break:break-word}
+.msg-b{max-width:88%;padding:9px 13px;border-radius:12px;font-size:.9rem;font-weight:600;line-height:1.5;word-break:break-word}
 .msg-b.out{align-self:flex-end;background:linear-gradient(135deg,rgba(26,110,245,.15),rgba(124,58,237,.1));border:1px solid rgba(26,110,245,.2);color:var(--text)}
 .msg-b.in{align-self:flex-start;background:var(--bg);border:1px solid var(--border);color:var(--text)}
 .msg-b.sos-msg{background:var(--rlt);border-color:#fca5a5;color:var(--red);font-weight:700}
 .msg-meta{font-size:.6rem;color:var(--muted2);margin-top:2px}
 .chat-input-row{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--div)}
-.chat-inp{flex:1;background:var(--bg);border:1.5px solid var(--border);border-radius:9px;padding:8px 11px;font-family:'Inter',sans-serif;font-size:.82rem;color:var(--text);outline:none}
+.chat-inp{flex:1;background:#f8f8f8;border:2px solid #9aaabf;border-radius:9px;padding:10px 13px;font-family:'Inter',sans-serif;font-size:.95rem;font-weight:600;color:#000000;outline:none}
 .chat-inp:focus{border-color:var(--blue)}
-.chat-send{background:var(--blue);border:none;border-radius:9px;padding:8px 13px;color:#fff;font-weight:700;font-size:.78rem;cursor:pointer;transition:all .15s;flex-shrink:0}
+.chat-send{background:#0047cc;border:none;border-radius:9px;padding:10px 16px;color:#fff;font-weight:800;font-size:.9rem;cursor:pointer;transition:all .15s;flex-shrink:0}
 .chat-send:hover{background:var(--bdark)}
 .quick-msgs{display:flex;flex-wrap:wrap;gap:5px;padding:6px 10px;border-top:1px solid var(--div)}
 .qm{background:var(--bg);border:1.5px solid var(--border);border-radius:20px;padding:4px 11px;font-size:.71rem;font-weight:600;color:var(--text);cursor:pointer;transition:all .12s}
@@ -457,7 +457,10 @@ body{font-family:'Inter',sans-serif;background:#ffffff;color:#000000;font-size:1
   <div class="chat-panel" id="chat-panel">
     <div class="chat-head">
       <div class="chat-head-lbl">💬 Group Chat</div>
-      <button class="btn-xs" onclick="closeChatPanel()">✕</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn-xs" onclick="testSend()" style="background:#0047cc;color:#fff;border-color:#0047cc">🧪 Test</button>
+        <button class="btn-xs" onclick="closeChatPanel()">✕</button>
+      </div>
     </div>
     <div class="quick-msgs">
       <div class="qm" onclick="sendQuick('Come here! 📢')">📢 Come here</div>
@@ -622,7 +625,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     renderKw();
     setTimeout(()=>doConnect(true),800);
   } else renderKw();
-  document.getElementById('chat-inp').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat();});
+  document.getElementById('chat-inp').addEventListener('keydown',function(e){if(e.key==='Enter')sendChat();});
 });
 
 // ════════════════════════════════════════════════════════════
@@ -687,7 +690,12 @@ function connectMQTT(){
       S.isConn=true;S.isConnecting=false;
       document.getElementById('btn-conn').disabled=false;
       setSdot('live');setStxt('Connected (Public MQTT) · '+S.channel);
-      ['ctrl','audio','chat'].forEach(t=>S.client.subscribe('vcp/'+S.channel+'/'+t));
+      // Subscribe to all topics with QoS 1 for reliability
+      const topics = ['ctrl','audio','chat'];
+      topics.forEach(t=>{
+        S.client.subscribe('vcp/'+S.channel+'/'+t, {qos:1});
+        addLog('📡 Subscribed: vcp/'+S.channel+'/'+t,'sys');
+      });
       onConnected();
     },
     onFailure:()=>{
@@ -733,12 +741,23 @@ function connectWS(){
 
 function pub(topic,payload){
   const data={...payload,from:S.clientId,fromName:S.myName,fromRole:S.role};
-  if(S.backend==='mqtt'&&S.client&&S.client.isConnected()){
-    const m=new Paho.Message(JSON.stringify(data));
-    m.destinationName='vcp/'+S.channel+'/'+topic;m.qos=0;
-    try{S.client.send(m);}catch(e){}
-  } else if(S.backend==='ws'&&S.wsClient&&S.wsClient.readyState===1){
-    try{S.wsClient.send(JSON.stringify({...data,topic}));}catch(e){}
+  const json=JSON.stringify(data);
+  if(S.backend==='mqtt'){
+    if(S.client&&S.client.isConnected()){
+      try{
+        const m=new Paho.Message(json);
+        m.destinationName='vcp/'+S.channel+'/'+topic;
+        m.qos=1; // QoS 1 = guaranteed delivery (was 0)
+        m.retained=false;
+        S.client.send(m);
+      }catch(e){addLog('❌ Send error: '+e.message,'sys');}
+    } else {
+      addLog('❌ Not connected to MQTT','sys');
+    }
+  } else if(S.backend==='ws'){
+    if(S.wsClient&&S.wsClient.readyState===1){
+      try{S.wsClient.send(JSON.stringify({...data,topic}));}catch(e){addLog('❌ WS send error','sys');}
+    }
   }
 }
 
@@ -771,7 +790,16 @@ function onMsg(d){
     case 'rtc_answer':hdlAnswer(d.sdp); break;
     case 'rtc_ice':   hdlIce(d.candidate); break;
     case 'audio_chunk':playChunk(d.data,d.mime); break;
-    case 'chat_msg':  addChatMsg(d.fromName,d.text,d.isSOS,false); if(S.soundOn)beep(1000,.06,.06); checkAutoReply(d.text); if(S.vibrateOn)vibrate([100]); break;
+    case 'chat_msg':
+      addChatMsg((d.fromName||'Remote'),d.text,d.isSOS,false);
+      if(S.soundOn)beep(1000,.06,.06);
+      checkAutoReply(d.text);
+      if(S.vibrateOn)vibrate([100]);
+      addLog('💬 MSG from '+(d.fromName||'Remote')+': '+String(d.text).substring(0,15),'rx');
+      // Auto open chat panel
+      document.getElementById('chat-panel').classList.add('visible');
+      S.chatVisible=true;
+      break;
     case 'sos':       showSOS(d.fromName); break;
     case 'ping':      setSig(5); addLog('📡 Ping from '+(d.fromName||d.from),'sys'); if(S.soundOn)beep(900,.05,.06); break;
     case 'location_reply': addChatMsg(d.fromName,'📍 '+d.text,false,false); addLog('📍 Location received','sys'); break;
@@ -834,7 +862,7 @@ async function startTX(){
     S.mediaRecorder.ondataavailable=async e=>{
       if(e.data.size>0&&S.isTX){const r=new FileReader();r.onloadend=()=>pub('audio',{type:'audio_chunk',data:r.result.split(',')[1],mime});r.readAsDataURL(e.data);}
     };
-    S.mediaRecorder.start(200);
+    S.mediaRecorder.start(100);
   }catch(err){addLog('❌ Mic: '+err.message.substring(0,24),'sys');stopTX();}
 }
 function stopTX(){
@@ -930,11 +958,21 @@ async function hdlIce(c){if(S.pc&&S.pc.remoteDescription){try{await S.pc.addIceC
 function sendChat(){
   const inp=document.getElementById('chat-inp');
   const t=inp.value.trim();if(!t)return;
+  if(!S.isConn){alert('Not connected! Check connection first.');return;}
+  // Send via BOTH ctrl and chat topics for reliability
+  pub('ctrl',{type:'chat_msg',text:t,isSOS:false});
   pub('chat',{type:'chat_msg',text:t,isSOS:false});
-  addChatMsg(S.myName,t,false,true);
+  addChatMsg('You ('+S.myName+')',t,false,true);
   inp.value='';
+  addLog('💬 Message sent: '+t.substring(0,20),'sys');
 }
-function sendQuick(t){pub('chat',{type:'chat_msg',text:t,isSOS:false});addChatMsg(S.myName,t,false,true);}
+function sendQuick(t){
+  if(!S.isConn){alert('Not connected!');return;}
+  pub('ctrl',{type:'chat_msg',text:t,isSOS:false});
+  pub('chat',{type:'chat_msg',text:t,isSOS:false});
+  addChatMsg('You ('+S.myName+')',t,false,true);
+  addLog('💬 Quick msg sent','sys');
+}
 function addChatMsg(from,text,isSOS,isOut){
   const msgs=document.getElementById('chat-msgs');
   const d=document.createElement('div');
@@ -1058,6 +1096,17 @@ let ringT=null;function ringSound(){ringT=setInterval(()=>{beep(800,.15,.1);setT
 function stopRing(){clearInterval(ringT);ringT=null;}
 function sosSound(){for(let i=0;i<5;i++)setTimeout(()=>{beep(440+i*60,.2,.15,'square');},i*180);}
 function doPing(){pub('ctrl',{type:'ping'});addLog('📡 Ping sent','tx');beep(1000,.08,.06);}
+
+function testSend(){
+  // Test if messages are going through
+  const testMsg='TEST MSG '+new Date().toLocaleTimeString();
+  addLog('🧪 Sending test message...','sys');
+  pub('ctrl',{type:'chat_msg',text:testMsg,isSOS:false});
+  pub('chat',{type:'chat_msg',text:testMsg,isSOS:false});
+  addChatMsg('You (Test)',testMsg,false,true);
+  addLog('🧪 Test sent - check other device','sys');
+  if(!S.isConn) addLog('❌ WARNING: Not connected!','sys');
+}
 function vibrate(pattern){try{navigator.vibrate&&navigator.vibrate(pattern);}catch(e){}}
 
 // ════════════════════════════════════════════════════════════
