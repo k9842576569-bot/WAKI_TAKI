@@ -282,7 +282,33 @@ body{font-family:'Inter',sans-serif;background:#ffffff;color:#000000;font-size:1
 ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
 </style>
 </head>
-<body><div id="ver-bar" style="
+<body>
+
+<!-- AUDIO UNLOCK OVERLAY -->
+<div id="unlock-overlay" style="
+  position:fixed;inset:0;z-index:99999;
+  background:rgba(0,0,70,0.97);
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:20px;cursor:pointer;
+" onclick="unlockAudio()">
+  <div style="font-size:4rem">🔊</div>
+  <div style="
+    font-family:monospace;font-size:1.5rem;font-weight:900;
+    color:#ffffff;letter-spacing:2px;text-align:center;
+  ">TAP HERE TO START</div>
+  <div style="
+    font-size:1rem;color:#aaaaff;text-align:center;
+    max-width:280px;line-height:1.6;
+  ">Tap once to enable sound<br>then voice will work</div>
+  <div style="
+    background:#1a6ef5;color:#fff;
+    border:none;border-radius:16px;
+    padding:18px 48px;font-size:1.1rem;font-weight:800;
+    letter-spacing:1px;margin-top:10px;
+  ">▶ TAP TO ENABLE AUDIO</div>
+  <div style="font-size:.75rem;color:#666;margin-top:8px">VoiceCast Pro v3.0</div>
+</div><div id="ver-bar" style="
   position:fixed;bottom:0;left:0;right:0;z-index:9999;
   background:#0047cc;color:#ffffff;
   font-family:monospace;font-size:13px;font-weight:700;
@@ -418,7 +444,7 @@ body{font-family:'Inter',sans-serif;background:#ffffff;color:#000000;font-size:1
   <div class="tabs">
     <button class="tab on" id="t-ptt" onclick="setMode('ptt')">🎙 PTT</button>
     <button class="tab" id="t-ic" onclick="setMode('intercom')">📞 Intercom</button>
-    <button class="tab" id="t-chat" onclick="setMode('chat')">💬 Chat</button>
+    <button class="tab" id="t-chat" onclick="setMode('chat')">💬 Chat <span id="chat-badge" style="display:none;background:#cc0000;color:#fff;border-radius:10px;padding:0 5px;font-size:.6rem;margin-left:2px">0</span></button>
     <button class="tab sos-tab" id="t-sos" onclick="setMode('sos')" style="color:var(--red)">🚨 SOS</button>
   </div>
 
@@ -796,10 +822,15 @@ function onMsg(d){
       if(S.soundOn)beep(1000,.06,.06);
       checkAutoReply(d.text);
       if(S.vibrateOn)vibrate([100]);
-      addLog('💬 MSG from '+(d.fromName||'Remote')+': '+String(d.text).substring(0,15),'rx');
+      addLog('💬 MSG from '+(d.fromName||'Remote')+': '+String(d.text).substring(0,20),'rx');
+      // Show BIG popup notification
+      showMsgPopup(d.fromName||'Remote', d.text); if(S.mode!=='chat') incChatBadge();
       // Auto open chat panel
       document.getElementById('chat-panel').classList.add('visible');
       S.chatVisible=true;
+      // Flash screen briefly
+      document.body.style.background='#e8f5e9';
+      setTimeout(()=>document.body.style.background='#ffffff',800);
       break;
     case 'sos':       showSOS(d.fromName); break;
     case 'ping':      setSig(5); addLog('📡 Ping from '+(d.fromName||d.from),'sys'); if(S.soundOn)beep(900,.05,.06); break;
@@ -887,9 +918,10 @@ function stopTX(){
 // ════════════════════════════════════════════════════════════
 function startRX(from){
   S.isRX=true;
-  // Flash the screen to show audio is coming
-  document.body.style.background='#fffde7';
-  setTimeout(()=>document.body.style.background='#ffffff',1000);
+  // Flash the screen yellow - audio incoming
+  document.body.style.background='#fff9c4';
+  setTimeout(()=>document.body.style.background='#ffffff',1500);
+  showMsgPopup(from||'Remote', '🎙 Speaking now — LISTEN!');
   setStatus('RECEIVING','🟠 '+(from||'Remote')+' is speaking — LISTEN NOW','rx');
   document.getElementById('ptt-ring').className='ptt-ring rx';
   document.getElementById('ptt-btn').className='ptt-btn rx';
@@ -914,11 +946,32 @@ async function playChunk(b64,mime){
 }
 async function drain(){
   if(!aQ.length){aPlaying=false;return;}aPlaying=true;
-  const url=aQ.shift();const a=new Audio();a.src=url;
-  // Use maximum volume for received audio
-  a.volume=Math.max(S.vols[S.volIdx], 0.9);
-  animRX();a.onended=()=>{URL.revokeObjectURL(url);drain();};a.onerror=()=>{URL.revokeObjectURL(url);drain();};
-  try{await a.play();}catch(e){drain();}
+  const url=aQ.shift();
+  const a=new Audio();
+  a.src=url;
+  a.volume=Math.max(S.vols[S.volIdx], 1.0);
+  a.preload='auto';
+  animRX();
+  a.onended=()=>{URL.revokeObjectURL(url);drain();};
+  a.onerror=(e)=>{
+    console.log('Audio error:',e,a.error);
+    URL.revokeObjectURL(url);
+    drain();
+  };
+  try {
+    const playPromise = a.play();
+    if (playPromise !== undefined) {
+      await playPromise;
+    }
+  } catch(e){
+    console.log('Play failed:', e.name, e.message);
+    // If autoplay blocked, try after tiny delay
+    if (e.name === 'NotAllowedError') {
+      addLog('⚠️ Click the page once to enable audio!','sys');
+    }
+    URL.revokeObjectURL(url);
+    drain();
+  }
 }
 function animRX(){
   clearInterval(S.rxLvlTimer);
@@ -1079,6 +1132,7 @@ function setMode(m){
     setStatus('CHAT MODE','Text messages to all room members','');
     document.getElementById('chat-panel').classList.add('visible');S.chatVisible=true;
     document.getElementById('act-em').textContent='📤';document.getElementById('act-lb').textContent='Send';
+    clearChatBadge();
   } else if(m==='sos'){
     pttRing.className='ptt-ring sos-ring';pttBtn.className='ptt-btn sos-btn';
     pttIco.textContent='🚨';pttLbl.textContent='TAP SOS';
@@ -1214,6 +1268,79 @@ function setSdot(c){document.getElementById('sdot').className='sdot '+(c||'');}
 function setStxt(t){document.getElementById('stxt').textContent=t;}
 function nowTime(){return new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});}
 function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// AUDIO UNLOCK — must be called from user click
+let _audioUnlocked = false;
+function unlockAudio() {
+  if (_audioUnlocked) return;
+  // Create and immediately resume AudioContext to unlock browser audio
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.resume().then(() => {
+      // Play a silent beep to fully unlock
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      gain.gain.setValueAtTime(0.001, ctx.currentTime); // near silent
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.1);
+      _audioUnlocked = true;
+      console.log('Audio unlocked!');
+    });
+  } catch(e) { console.log('Unlock error:', e); }
+
+  // Hide overlay
+  const overlay = document.getElementById('unlock-overlay');
+  if (overlay) {
+    overlay.style.transition = 'opacity 0.4s';
+    overlay.style.opacity = '0';
+    setTimeout(() => overlay.style.display = 'none', 400);
+  }
+
+  // Play a welcome beep to confirm audio works
+  setTimeout(() => {
+    beep(600, 0.1, 0.08);
+    setTimeout(() => beep(900, 0.1, 0.1), 120);
+    setTimeout(() => beep(1200, 0.12, 0.12), 240);
+  }, 200);
+}
+
+let _unreadChat = 0;
+function incChatBadge(){
+  _unreadChat++;
+  const b=document.getElementById('chat-badge');
+  if(b){b.style.display='inline';b.textContent=_unreadChat;}
+}
+function clearChatBadge(){
+  _unreadChat=0;
+  const b=document.getElementById('chat-badge');
+  if(b){b.style.display='none';b.textContent='0';}
+}
+
+function showMsgPopup(from, text) {
+  const popup = document.getElementById('msg-popup');
+  const ptxt = document.getElementById('popup-text');
+  if (!popup || !ptxt) return;
+  ptxt.textContent = '📥 ' + from + ': ' + text;
+  popup.style.display = 'block';
+  popup.style.background = text.includes('SOS') ? '#cc0000' : '#000000';
+  clearTimeout(window._popupTimer);
+  window._popupTimer = setTimeout(() => { popup.style.display='none'; }, 5000);
+}
 </script>
+
+<div id="msg-popup" style="
+  display:none;position:fixed;top:0;left:0;right:0;z-index:9999;
+  background:#000;color:#fff;padding:16px 20px;
+  font-family:monospace;font-size:1.1rem;font-weight:bold;
+  border-bottom:4px solid #00e676;text-align:center;
+  animation:slideDown .3s ease;
+" id="msg-popup">
+  <span id="popup-text">New message</span>
+  <span onclick="document.getElementById('msg-popup').style.display='none'"
+    style="float:right;cursor:pointer;font-size:1.2rem;margin-left:16px">✕</span>
+</div>
+<style>@keyframes slideDown{from{transform:translateY(-100%)}to{transform:translateY(0)}}</style>
 </body>
 </html>
